@@ -1184,6 +1184,206 @@ area2 := rect.Area()           // Method call (more OOP-like)
 
 ---
 
+### Channels - Buffered and Unbuffered
+
+Channels are Go's way of communicating between goroutines. They come in two types: **unbuffered** and **buffered**.
+
+**Unbuffered Channels:**
+
+Unbuffered channels have **no capacity** - they require both sender and receiver to be ready at the same time (synchronous).
+
+```go
+// Create unbuffered channel
+ch := make(chan int)
+
+// Sending blocks until someone receives
+go func() {
+    ch <- 42  // Blocks until main goroutine receives
+}()
+
+value := <-ch  // Blocks until goroutine sends
+fmt.Println(value)  // 42
+```
+
+**Key characteristics of unbuffered channels:**
+- **Synchronous**: Send and receive must happen together
+- **Blocking**: Sender blocks until receiver is ready, and vice versa
+- **Guaranteed delivery**: Data is transferred directly between goroutines
+- **Zero capacity**: `make(chan Type)` or `make(chan Type, 0)`
+
+**Buffered Channels:**
+
+Buffered channels have a **capacity** - they can hold values without a receiver being immediately ready (asynchronous up to capacity).
+
+```go
+// Create buffered channel with capacity 3
+ch := make(chan int, 3)
+
+// Can send up to 3 values without blocking
+ch <- 1
+ch <- 2
+ch <- 3
+// ch <- 4  // This would block until someone receives
+
+// Receive values
+fmt.Println(<-ch)  // 1
+fmt.Println(<-ch)  // 2
+fmt.Println(<-ch)  // 3
+```
+
+**Key characteristics of buffered channels:**
+- **Asynchronous (up to capacity)**: Sender doesn't block if buffer has space
+- **Blocks when full**: Send blocks if buffer is full
+- **Blocks when empty**: Receive blocks if buffer is empty
+- **Specified capacity**: `make(chan Type, capacity)`
+
+**Comparison:**
+
+```go
+// Unbuffered - must have receiver ready
+unbuffered := make(chan int)
+unbuffered <- 1  // DEADLOCK! No receiver ready
+
+// Buffered - can send without receiver (up to capacity)
+buffered := make(chan int, 2)
+buffered <- 1  // OK - buffer has space
+buffered <- 2  // OK - buffer still has space
+// buffered <- 3  // DEADLOCK! Buffer full, no receiver
+```
+
+**Practical example - Unbuffered:**
+
+```go
+func worker(ch chan int) {
+    for num := range ch {
+        fmt.Println("Processing:", num)
+        time.Sleep(time.Second)
+    }
+}
+
+func main() {
+    ch := make(chan int)  // Unbuffered
+    
+    go worker(ch)
+    
+    for i := 1; i <= 5; i++ {
+        ch <- i  // Blocks until worker receives each value
+        fmt.Println("Sent:", i)
+    }
+    
+    close(ch)
+}
+
+// Output shows alternating Send/Process (synchronous)
+```
+
+**Practical example - Buffered:**
+
+```go
+func worker(ch chan int) {
+    for num := range ch {
+        fmt.Println("Processing:", num)
+        time.Sleep(time.Second)
+    }
+}
+
+func main() {
+    ch := make(chan int, 3)  // Buffered capacity 3
+    
+    go worker(ch)
+    
+    for i := 1; i <= 5; i++ {
+        ch <- i  // First 3 don't block
+        fmt.Println("Sent:", i)
+    }
+    
+    close(ch)
+}
+
+// Output shows first 3 Sent immediately, then waits
+```
+
+**When to use unbuffered:**
+- When you need guaranteed synchronization between goroutines
+- For handshake/acknowledgment patterns
+- When timing of send/receive matters
+- Default choice (simpler reasoning)
+
+**When to use buffered:**
+- To decouple sender and receiver timing
+- As a semaphore (limit concurrent operations)
+- To prevent goroutine blocking temporarily
+- For worker pool queues
+- When you know the capacity needed
+
+**Common patterns:**
+
+**Semaphore pattern (limit concurrency):**
+```go
+// Limit to 3 concurrent operations
+sem := make(chan struct{}, 3)
+
+for i := 0; i < 10; i++ {
+    sem <- struct{}{}  // Acquire
+    go func(id int) {
+        defer func() { <-sem }()  // Release
+        // Do work...
+        fmt.Println("Worker", id)
+    }(i)
+}
+```
+
+**Fan-out pattern:**
+```go
+func fanOut(input <-chan int, workers int) []<-chan int {
+    channels := make([]<-chan int, workers)
+    
+    for i := 0; i < workers; i++ {
+        ch := make(chan int, 10)  // Buffered for better throughput
+        channels[i] = ch
+        
+        go func(out chan int) {
+            for val := range input {
+                out <- val * 2
+            }
+            close(out)
+        }(ch)
+    }
+    
+    return channels
+}
+```
+
+**Important notes:**
+- Sending to a closed channel causes panic
+- Receiving from a closed channel returns zero value and false
+- Unbuffered channels guarantee synchronization
+- Buffered channels improve throughput but add complexity
+- Channel buffer size should be based on actual need, not arbitrary
+- Closing channels is sender's responsibility
+
+**Checking channel status:**
+```go
+ch := make(chan int, 2)
+ch <- 1
+ch <- 2
+close(ch)
+
+// Receive with status check
+val, ok := <-ch
+fmt.Println(val, ok)  // 1 true
+
+val, ok = <-ch
+fmt.Println(val, ok)  // 2 true
+
+val, ok = <-ch
+fmt.Println(val, ok)  // 0 false (channel closed and empty)
+```
+
+**Note:** Channels are Go's primary concurrency primitive for communication between goroutines, following the principle "Don't communicate by sharing memory; share memory by communicating."
+
+---
+
 ## Summary
 
 Go combines the best of both worlds:
